@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>APC Attendance Tracker</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <div class="app-container">
+    <nav class="sidebar glass-panel">
+      <div class="logo">
+        <img class="logo-img" src="APCLogoColor.webp" alt="">
+        <h2>APC Club</h2>
+      </div>
+      <ul class="nav-links">
+        <li class="active" data-target="dashboard">Dashboard</li>
+        <li data-target="events">Events</li>
+        <li data-target="kiosk">Attendance Kiosk</li>
+      </ul>
+      <div class="credits">
+        Made with ❤️ by <a class="github-link" href="https://github.com/pranay2702">Pranay</a>
+      </div>
+    </nav>
+
+    <main class="content-area">
+      <!-- DASHBOARD -->
+      <section id="dashboard" class="page active">
+        <header>
+          <h1>Overview</h1>
+          <p class="subtitle">Track your club's engagement seamlessly.</p>
+        </header>
+        <div class="stats-grid">
+          <div class="stat-card glass-panel">
+            <h3>Active Events</h3>
+            <p class="stat-value" id="active-events-count">0</p>
+          </div>
+          <div class="stat-card glass-panel">
+            <h3>Total Events</h3>
+            <p class="stat-value" id="total-events-count">0</p>
+          </div>
+        </div>
+        <div class="active-events-list glass-panel mt-4">
+          <h3>Happening Today</h3>
+          <ul id="active-events-ul">
+            <li>Loading...</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- EVENTS MANAGEMENT -->
+      <section id="events" class="page">
+        <header>
+          <h1>Events Management</h1>
+          <button id="btn-show-create-event" class="btn-primary">Create Event</button>
+        </header>
+
+        <div id="create-event-modal" class="modal hidden">
+          <div class="modal-content glass-panel">
+            <h2 id="modal-title">Create New Event</h2>
+            <form id="create-event-form">
+              <input type="hidden" id="event-id">
+              <div class="form-group">
+                <label>Event Name</label>
+                <input type="text" id="event-name" required>
+              </div>
+              <div class="form-group">
+                <label>Description</label>
+                <textarea id="event-desc" rows="3"></textarea>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Start Date</label>
+                  <input type="date" id="event-start" required>
+                </div>
+                <div class="form-group">
+                  <label>End Date</label>
+                  <input type="date" id="event-end" required>
+                </div>
+              </div>
+              <div class="modal-actions">
+                <button type="button" id="btn-cancel-event" class="btn-secondary">Cancel</button>
+                <button type="submit" class="btn-primary" id="btn-save-event">Save Event</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="events-list mt-4" id="all-events-container">
+          <!-- Event Cards go here -->
+        </div>
+
+        <!-- REPORT MODAL -->
+        <div id="report-modal" class="modal hidden">
+          <div class="modal-content glass-panel large-modal">
+            <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <h2 style="margin: 0;">Event Report</h2>
+              <button id="btn-show-manual-att" class="btn-primary" style="padding: 8px 16px;">Add Attendance</button>
+            </div>
+            <p id="report-event-name"></p>
+            <div class="table-container">
+              <table id="report-table">
+                <thead>
+                  <tr>
+                    <th>SID</th>
+                    <th>Name</th>
+                    <th>Days Present</th>
+                    <th>%</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Rows injected here -->
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-actions mt-4">
+              <button type="button" id="btn-close-report" class="btn-secondary">Close</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ATTENDANCE DETAILS MODAL -->
+        <div id="attendance-details-modal" class="modal hidden">
+          <div class="modal-content glass-panel">
+            <h2>Attendance Details</h2>
+            <p id="details-student-info"></p>
+            <div class="table-container mt-4">
+              <table id="details-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Rows injected here -->
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-actions mt-4">
+              <button type="button" id="btn-close-details" class="btn-secondary">Back to Report</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MANUAL ATTENDANCE MODAL -->
+        <div id="manual-attendance-modal" class="modal hidden">
+          <div class="modal-content glass-panel">
+            <h2>Add Manual Attendance</h2>
+            <form id="manual-attendance-form">
+              <input type="hidden" id="manual-att-event-id">
+              <div class="form-group">
+                <label>Student ID (SID)</label>
+                <input type="text" id="manual-att-sid" required autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label>Name (Only needed for new students)</label>
+                <input type="text" id="manual-att-name" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label>Date</label>
+                <input type="date" id="manual-att-date" required>
+              </div>
+              <div class="modal-actions">
+                <button type="button" id="btn-cancel-manual-att" class="btn-secondary">Cancel</button>
+                <button type="submit" class="btn-primary">Add Attendance</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- DAILY ATTENDANCE -->
+      <section id="daily-attendance" class="page">
+        <header>
+          <h1>Daily Attendance</h1>
+          <div class="form-group" style="flex-direction: row; align-items: center; gap: 1rem;">
+            <label for="daily-date-picker">Select Date:</label>
+            <input type="date" id="daily-date-picker" class="input-glow-wrapper">
+            <button id="btn-fetch-daily" class="btn-primary">View</button>
+          </div>
+        </header>
+
+        <div class="glass-panel mt-4">
+          <div class="table-container">
+            <table id="daily-table">
+              <thead>
+                <tr>
+                  <th>SID</th>
+                  <th>Name</th>
+                  <th>Event</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="4">Select a date to view attendance.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- EDIT ATTENDANCE MODAL -->
+        <div id="edit-attendance-modal" class="modal hidden">
+          <div class="modal-content glass-panel">
+            <h2>Edit Attendance</h2>
+            <form id="edit-attendance-form">
+              <input type="hidden" id="edit-att-id">
+              <div class="form-group">
+                <label>Student ID (SID)</label>
+                <input type="text" id="edit-att-sid" required>
+              </div>
+              <div class="form-group">
+                <label>Date</label>
+                <input type="date" id="edit-att-date" required>
+              </div>
+              <div class="modal-actions">
+                <button type="button" id="btn-cancel-edit-att" class="btn-secondary">Cancel</button>
+                <button type="submit" class="btn-primary">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- KIOSK (MARK ATTENDANCE) -->
+      <section id="kiosk" class="page">
+        <div class="kiosk-container glass-panel">
+          <h1>Mark Attendance</h1>
+          <p>Scan your ID or enter your SID below.</p>
+
+          <div class="form-group mt-4">
+            <label>Select Active Event</label>
+            <select id="kiosk-event-select">
+              <option value="">No active events today</option>
+            </select>
+          </div>
+
+          <form id="kiosk-form" class="mt-4">
+            <div class="input-glow-wrapper">
+              <input type="text" id="kiosk-sid" placeholder="Enter SID (e.g. 2026123)" required autocomplete="off">
+            </div>
+
+            <div id="kiosk-name-group" class="input-glow-wrapper hidden mt-4">
+              <input type="text" id="kiosk-name" placeholder="Enter Name (First Time Only)" autocomplete="off">
+            </div>
+
+            <button type="submit" class="btn-primary mt-4 w-full">Mark Present</button>
+          </form>
+
+          <div id="kiosk-message" class="message hidden mt-4"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+
+</html>
