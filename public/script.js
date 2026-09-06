@@ -87,9 +87,16 @@ document.addEventListener('DOMContentLoaded', () => {
   async function fetchEvents() {
     try {
       const res = await fetch(`${API_BASE}/events`);
+      if (!res.ok) {
+        const errData = await res.json();
+        console.error('Server error fetching events:', errData);
+        alert('Error fetching events: ' + (errData.error || '500 Internal Server Error'));
+        return [];
+      }
       return await res.json();
     } catch (e) {
       console.error(e);
+      alert('Network error fetching events.');
       return [];
     }
   }
@@ -97,6 +104,11 @@ document.addEventListener('DOMContentLoaded', () => {
   async function fetchActiveEvents() {
     try {
       const res = await fetch(`${API_BASE}/events/active`);
+      if (!res.ok) {
+        const errData = await res.json();
+        console.error('Server error fetching active events:', errData);
+        return [];
+      }
       return await res.json();
     } catch (e) {
       console.error(e);
