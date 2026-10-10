@@ -233,6 +233,73 @@ h1 {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.btn-danger {
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  color: #fff;
+  border: 1px solid rgba(231, 76, 60, 0.4);
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+}
+
+.btn-danger:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px rgba(231, 76, 60, 0.5);
+  background: linear-gradient(135deg, #ff5252, #e74c3c);
+}
+
+.badge-btn {
+  border: none;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.badge-btn:hover {
+  transform: scale(1.08);
+}
+
+.badge-qualified {
+  background: rgba(46, 204, 113, 0.2);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.5);
+}
+
+.badge-qualified:hover {
+  background: rgba(46, 204, 113, 0.35);
+  box-shadow: 0 0 10px rgba(46, 204, 113, 0.4);
+}
+
+.badge-not-qualified {
+  background: rgba(231, 76, 60, 0.2);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.5);
+}
+
+.badge-not-qualified:hover {
+  background: rgba(231, 76, 60, 0.35);
+  box-shadow: 0 0 10px rgba(231, 76, 60, 0.4);
+}
+
+.badge-overridden-indicator {
+  font-size: 0.72rem;
+  opacity: 0.85;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 1px 5px;
+  border-radius: 6px;
+  margin-left: 4px;
+}
+
 /* Forms */
 .form-group {
   margin-bottom: 20px;

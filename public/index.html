@@ -19,6 +19,7 @@
       <ul class="nav-links">
         <li class="active" data-target="dashboard">Dashboard</li>
         <li data-target="events">Events</li>
+        <li data-target="daily-attendance">Daily Attendance</li>
         <li data-target="kiosk">Attendance Kiosk</li>
       </ul>
       <div class="credits">
@@ -53,9 +54,13 @@
 
       <!-- EVENTS MANAGEMENT -->
       <section id="events" class="page">
-        <header>
+        <header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
           <h1>Events Management</h1>
-          <button id="btn-show-create-event" class="btn-primary">Create Event</button>
+          <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+            <button id="btn-export-merged-qualified" class="btn-secondary">Export Qualified (Merged)</button>
+            <button id="btn-delete-all-events" class="btn-danger">Delete All Events</button>
+            <button id="btn-show-create-event" class="btn-primary">Create Event</button>
+          </div>
         </header>
 
         <div id="create-event-modal" class="modal hidden">
@@ -96,9 +101,12 @@
         <!-- REPORT MODAL -->
         <div id="report-modal" class="modal hidden">
           <div class="modal-content glass-panel large-modal">
-            <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
               <h2 style="margin: 0;">Event Report</h2>
-              <button id="btn-show-manual-att" class="btn-primary" style="padding: 8px 16px;">Add Attendance</button>
+              <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button id="btn-export-event-excel" class="btn-secondary" style="padding: 8px 16px;">Export Excel</button>
+                <button id="btn-show-manual-att" class="btn-primary" style="padding: 8px 16px;">Add Attendance</button>
+              </div>
             </div>
             <p id="report-event-name"></p>
             <div class="table-container">

@@ -22,6 +22,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const createEventForm = document.getElementById('create-event-form');
   const eventIdInput = document.getElementById('event-id');
   const modalTitle = document.getElementById('modal-title');
+  const btnExportMergedQualified = document.getElementById('btn-export-merged-qualified');
+  const btnDeleteAllEvents = document.getElementById('btn-delete-all-events');
+  const btnExportEventExcel = document.getElementById('btn-export-event-excel');
   const reportModal = document.getElementById('report-modal');
   const btnCloseReport = document.getElementById('btn-close-report');
   const btnShowManualAtt = document.getElementById('btn-show-manual-att');
@@ -156,10 +159,11 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <p><strong>Dates:</strong> ${start} to ${end}</p>
         </div>
-        <div class="mt-4 flex gap-2">
-          <button class="btn-primary" onclick="openReport('${evt._id}', '${evt.name}')">View Report</button>
+        <div class="mt-4 flex gap-2" style="flex-wrap: wrap;">
+          <button class="btn-primary" onclick="openReport('${evt._id}', '${evt.name.replace(/'/g, "\\'")}')">View Report</button>
+          <button class="btn-secondary" onclick="exportEventExcel('${evt._id}')">Export Excel</button>
           <button class="btn-secondary" onclick="editEvent('${evt._id}')">Edit</button>
-          <button class="btn-danger" onclick="deleteEvent('${evt._id}')" style="background-color: var(--danger-color); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer;">Delete</button>
+          <button class="btn-danger" onclick="deleteEvent('${evt._id}')">Delete</button>
         </div>
       `;
       allEventsContainer.appendChild(card);
@@ -318,17 +322,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
       data.report.forEach(r => {
         const tr = document.createElement('tr');
-        const statusClass = r.isQualified ? 'status-qualified' : 'status-not-qualified';
+        const statusBtnClass = r.isQualified ? 'badge-qualified' : 'badge-not-qualified';
+        const statusIcon = r.isQualified ? '✔' : '✖';
         const statusText = r.isQualified ? 'Qualified' : 'Not Qualified';
+        const overrideBadge = r.isOverridden ? '<span class="badge-overridden-indicator" title="Admin Override">Override</span>' : '';
         
         tr.innerHTML = `
           <td>${r.sid}</td>
           <td>${r.name}</td>
           <td>${r.daysPresent} / ${r.totalDays}</td>
           <td>${r.attendancePercentage}%</td>
-          <td class="${statusClass}">${statusText}</td>
           <td>
-            <button class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;" onclick="openAttendanceDetails('${eventId}', '${eventName}', '${r.sid}', '${r.name}')">Details</button>
+            <button class="badge-btn ${statusBtnClass}" onclick="toggleQualification('${eventId}', '${r.sid}', ${r.isQualified})" title="Click to toggle qualification status">
+              ${statusText} ${statusIcon} ${overrideBadge}
+            </button>
+          </td>
+          <td>
+            <button class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;" onclick="openAttendanceDetails('${eventId}', '${eventName.replace(/'/g, "\\'")}', '${r.sid}', '${r.name.replace(/'/g, "\\'")}')">Details</button>
           </td>
         `;
         reportTableBody.appendChild(tr);
@@ -584,4 +594,66 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // --- Qualification Toggle Logic ---
+  window.toggleQualification = async (eventId, sid, currentStatus) => {
+    const newStatus = !currentStatus;
+    try {
+      const res = await fetch(`${API_BASE}/events/${eventId}/qualification`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sid, isQualified: newStatus })
+      });
+      if (res.ok) {
+        openReport(currentReportEventId, currentReportEventName);
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to update qualification');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Error updating qualification status');
+    }
+  };
+
+  // --- Excel Exports & Delete All Logic ---
+  window.exportEventExcel = (eventId) => {
+    window.location.href = `${API_BASE}/events/${eventId}/export`;
+  };
+
+  if (btnExportEventExcel) {
+    btnExportEventExcel.addEventListener('click', () => {
+      if (!currentReportEventId) return;
+      window.location.href = `${API_BASE}/events/${currentReportEventId}/export`;
+    });
+  }
+
+  if (btnExportMergedQualified) {
+    btnExportMergedQualified.addEventListener('click', () => {
+      window.location.href = `${API_BASE}/reports/qualified-merged`;
+    });
+  }
+
+  if (btnDeleteAllEvents) {
+    btnDeleteAllEvents.addEventListener('click', async () => {
+      const confirmed = confirm('WARNING: Are you sure you want to permanently delete ALL events, attendance records, and qualification statuses? This action CANNOT be undone.');
+      if (!confirmed) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/events`, { method: 'DELETE' });
+        if (res.ok) {
+          alert('All events and associated records have been successfully deleted.');
+          loadEvents();
+          loadDashboard();
+        } else {
+          const err = await res.json();
+          alert(err.error || 'Failed to delete events');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Network error deleting events');
+      }
+    });
+  }
+
 });
+
