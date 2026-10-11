@@ -9,6 +9,18 @@ const memberSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true
+  },
+  password: {
+    type: String,
+    default: null
+  },
+  email: {
+    type: String,
+    default: null
+  },
+  phone: {
+    type: String,
+    default: null
   }
 }, { timestamps: true });
 

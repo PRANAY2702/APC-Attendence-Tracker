@@ -16,7 +16,12 @@ const Event = require('./models/Event');
 const Member = require('./models/Member');
 const Attendance = require('./models/Attendance');
 const Qualification = require('./models/Qualification');
+const Otp = require('./models/Otp');
 const ExcelJS = require('exceljs');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'apc_attendance_jwt_secret_key_2026';
 
 const app = express();
 app.use(cors());
@@ -27,6 +32,399 @@ app.use(express.static(path.join(__dirname, 'public')));
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/apc_attendance')
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err));
+
+// --- AUTH & ROLE HELPERS ---
+function isSidAdmin(sid) {
+  if (!sid) return false;
+  const s = String(sid).trim();
+  return s.startsWith('23') || s.startsWith('24');
+}
+
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  let token = authHeader && authHeader.split(' ')[1];
+  if (!token && req.query.token) {
+    token = req.query.token;
+  }
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required. Please log in.' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired session. Please log in again.' });
+    }
+    req.user = user;
+    next();
+  });
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.user || !req.user.isAdmin) {
+    return res.status(403).json({ error: 'Access denied: Admin authorization required.' });
+  }
+  next();
+}
+
+// --- AUTH ROUTES ---
+
+// Login route
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { sid, password } = req.body;
+    if (!sid) return res.status(400).json({ error: 'SID is required' });
+
+    const trimmedSid = String(sid).trim();
+    const member = await Member.findOne({ sid: trimmedSid });
+
+    // If member not found in DB
+    if (!member) {
+      return res.json({
+        needsSetup: true,
+        sid: trimmedSid,
+        message: 'Student ID not registered yet. Please enter your name and choose a password.'
+      });
+    }
+
+    // If member registered via Kiosk or without password
+    if (!member.password) {
+      return res.json({
+        needsSetup: true,
+        sid: trimmedSid,
+        name: member.name,
+        email: member.email || '',
+        message: 'No password set for this account. Please set a password to continue.'
+      });
+    }
+
+    if (!password) {
+      return res.status(400).json({ error: 'Password is required' });
+    }
+
+    const isMatch = bcrypt.compareSync(password, member.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Incorrect password. Please try again.' });
+    }
+
+    const isAdmin = isSidAdmin(member.sid);
+    const token = jwt.sign(
+      { sid: member.sid, name: member.name, isAdmin },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      token,
+      user: {
+        sid: member.sid,
+        name: member.name,
+        isAdmin
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Email Transporter Helper (Nodemailer Gmail / SMTP)
+const nodemailer = require('nodemailer');
+
+function getEmailTransporter() {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    return null;
+  }
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER.trim(),
+      pass: process.env.EMAIL_PASS.trim()
+    }
+  });
+}
+
+// Production Email OTP Dispatcher
+async function sendEmailOtp({ sid, email, otp }) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const transporter = getEmailTransporter();
+
+  // 1. Live Gmail Dispatch
+  if (transporter) {
+    try {
+      const mailOptions = {
+        from: `"APC Attendance Portal" <${process.env.EMAIL_USER.trim()}>`,
+        to: cleanEmail,
+        subject: `APC Verification Code: ${otp}`,
+        html: `
+          <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; background: #0f172a; color: #f8fafc; border-radius: 12px; border: 1px solid #1e293b;">
+            <div style="text-align: center; margin-bottom: 24px;">
+              <h2 style="margin: 0; color: #38bdf8; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">APC Attendance</h2>
+              <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 14px;">Identity Verification</p>
+            </div>
+            <div style="background: #1e293b; border-radius: 8px; padding: 24px; text-align: center; border: 1px solid #334155;">
+              <p style="margin: 0 0 16px 0; color: #e2e8f0; font-size: 15px;">Your one-time verification code for Student ID <strong>${sid}</strong> is:</p>
+              <div style="display: inline-block; background: #0284c7; color: #ffffff; font-size: 32px; font-weight: 800; letter-spacing: 6px; padding: 12px 28px; border-radius: 8px; font-family: monospace; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);">
+                ${otp}
+              </div>
+              <p style="margin: 18px 0 0 0; color: #94a3b8; font-size: 13px;">This code is valid for <strong>10 minutes</strong>. Do not share it with anyone.</p>
+            </div>
+            <div style="text-align: center; margin-top: 24px; color: #64748b; font-size: 12px;">
+              <p style="margin: 0;">If you did not request this verification code, you can safely ignore this email.</p>
+            </div>
+          </div>
+        `
+      };
+
+      await transporter.sendMail(mailOptions);
+      console.log(`[Email] ✅ OTP successfully emailed to ${cleanEmail} (SID: ${sid})`);
+      return { delivered: true, gateway: 'Gmail' };
+    } catch (err) {
+      console.error('[Email] ❌ Failed to send email:', err.message);
+      return { delivered: false, gateway: 'Gmail', error: err.message };
+    }
+  }
+
+  // 2. Local Terminal Fallback (when EMAIL_USER / EMAIL_PASS not in .env yet)
+  console.log(`\n=================================================`);
+  console.log(`[📧 EMAIL OTP GATEWAY] Recipient: ${cleanEmail} (SID: ${sid})`);
+  console.log(`[📧 EMAIL OTP GATEWAY] OTP CODE: ${otp} (Valid 10 mins)`);
+  console.log(`[ℹ️ Add EMAIL_USER & EMAIL_PASS to .env for live inbox delivery]`);
+  console.log(`=================================================\n`);
+
+  return {
+    delivered: false,
+    gateway: 'Dev/Console'
+  };
+}
+
+// Request Email OTP endpoint
+app.post('/api/auth/send-otp', async (req, res) => {
+  try {
+    const { sid, email } = req.body;
+    if (!sid) return res.status(400).json({ error: 'Student ID (SID) is required' });
+
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Please enter a valid email address to receive your verification code.' });
+    }
+
+    const trimmedSid = String(sid).trim();
+    const member = await Member.findOne({ sid: trimmedSid });
+
+    // If member already registered with an email, lock OTP requests to that email
+    if (member && member.email) {
+      if (member.email.trim().toLowerCase() !== cleanEmail) {
+        const [u, d] = member.email.split('@');
+        const masked = (u.length > 2 ? u.slice(0, 2) + '****' : u[0] + '****') + '@' + d;
+        return res.status(403).json({
+          error: `This SID is registered with email (${masked}). Please enter the registered email address.`
+        });
+      }
+    }
+
+    // Generate random 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    await Otp.findOneAndUpdate(
+      { sid: trimmedSid },
+      { sid: trimmedSid, email: cleanEmail, otp, expiresAt },
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    const sendResult = await sendEmailOtp({ sid: trimmedSid, email: cleanEmail, otp });
+
+    if (process.env.EMAIL_USER && !sendResult.delivered) {
+      return res.status(502).json({
+        error: `Email delivery failed: ${sendResult.error || 'Please verify your EMAIL_USER and EMAIL_PASS settings.'}`
+      });
+    }
+
+    const [u, d] = cleanEmail.split('@');
+    const maskedDisplay = (u.length > 2 ? u.slice(0, 2) + '****' : u[0] + '****') + '@' + d;
+
+    res.json({
+      success: true,
+      message: `Verification code sent to ${maskedDisplay}. Please check your inbox (and spam folder).`,
+      email: cleanEmail
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lookup member info by SID for autofill during registration / reset password
+app.get('/api/auth/lookup-sid/:sid', async (req, res) => {
+  try {
+    const trimmedSid = String(req.params.sid || '').trim();
+    if (!trimmedSid) {
+      return res.status(400).json({ error: 'SID is required' });
+    }
+
+    const member = await Member.findOne({ sid: trimmedSid });
+    if (!member) {
+      return res.json({ exists: false });
+    }
+
+    res.json({
+      exists: true,
+      sid: member.sid,
+      name: member.name || '',
+      email: member.email || '',
+      hasPassword: Boolean(member.password)
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Setup / Register / Reset Password with Mandatory Email OTP Verification
+app.post('/api/auth/setup-password', async (req, res) => {
+  try {
+    const { sid, name, email, otp, password } = req.body;
+    if (!sid || !password) {
+      return res.status(400).json({ error: 'SID and Password are required' });
+    }
+    if (!otp) {
+      return res.status(400).json({ error: 'Verification code is required. Please click "Send Email OTP" first.' });
+    }
+
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const trimmedSid = String(sid).trim();
+    const otpRecord = await Otp.findOne({ sid: trimmedSid });
+
+    if (!otpRecord) {
+      return res.status(400).json({ error: 'No verification code requested for this SID. Please click "Send Email OTP" first.' });
+    }
+
+    if (new Date() > otpRecord.expiresAt) {
+      await Otp.deleteOne({ sid: trimmedSid });
+      return res.status(400).json({ error: 'Verification code has expired. Please request a new code.' });
+    }
+
+    if (otpRecord.otp !== String(otp).trim()) {
+      return res.status(400).json({ error: 'Invalid verification code. Please check your email and re-enter.' });
+    }
+
+    if (cleanEmail && otpRecord.email && otpRecord.email !== cleanEmail) {
+      return res.status(400).json({ error: 'Email does not match the address the OTP was sent to.' });
+    }
+
+    // OTP verified! Remove the used OTP
+    const verifiedEmail = otpRecord.email;
+    await Otp.deleteOne({ sid: trimmedSid });
+
+    let member = await Member.findOne({ sid: trimmedSid });
+    const hashedPassword = bcrypt.hashSync(password, 10);
+
+    if (!member) {
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: 'Name is required to register.' });
+      }
+      member = new Member({
+        sid: trimmedSid,
+        name: name.trim(),
+        password: hashedPassword,
+        email: verifiedEmail
+      });
+      await member.save();
+    } else {
+      if (name && name.trim()) member.name = name.trim();
+      member.password = hashedPassword;
+      member.email = verifiedEmail;
+      await member.save();
+    }
+
+    const isAdmin = isSidAdmin(member.sid);
+    const token = jwt.sign(
+      { sid: member.sid, name: member.name, isAdmin },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      message: 'Email identity verified and password saved successfully!',
+      token,
+      user: {
+        sid: member.sid,
+        name: member.name,
+        isAdmin
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Current User Profile
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  res.json({ user: req.user });
+});
+
+// --- STUDENT SPECIFIC ROUTES ---
+
+// Get current logged-in student's personal attendance across all events
+app.get('/api/student/my-attendance', authenticateToken, async (req, res) => {
+  try {
+    const studentSid = req.user.sid;
+    const events = await Event.find().sort({ startDate: -1 });
+
+    const studentRecords = await Attendance.find({ sid: studentSid });
+    const overrides = await Qualification.find({ sid: studentSid });
+    const overrideMap = new Map();
+    overrides.forEach(o => overrideMap.set(String(o.eventId), o.isQualified));
+
+    const eventDetails = [];
+    for (const event of events) {
+      const records = studentRecords.filter(r => String(r.eventId) === String(event._id));
+      const daysPresent = records.length;
+      const attendancePercentage = event.totalDays > 0 ? (daysPresent / event.totalDays) * 100 : 0;
+      const isAutoQualified = attendancePercentage >= 40;
+      const isOverridden = overrideMap.has(String(event._id));
+      const isQualified = isOverridden ? overrideMap.get(String(event._id)) : isAutoQualified;
+
+      eventDetails.push({
+        eventId: event._id,
+        name: event.name,
+        description: event.description || '',
+        startDate: event.startDate,
+        endDate: event.endDate,
+        totalDays: event.totalDays,
+        isMultiDay: event.isMultiDay,
+        daysPresent,
+        attendancePercentage: attendancePercentage.toFixed(2),
+        isQualified,
+        isOverridden,
+        attendedDates: records.map(r => r.date).sort((a, b) => new Date(a) - new Date(b))
+      });
+    }
+
+    const attendedEvents = eventDetails.filter(e => e.daysPresent > 0);
+    const qualifiedEvents = eventDetails.filter(e => e.isQualified && e.daysPresent > 0);
+    const totalDaysAttended = eventDetails.reduce((sum, e) => sum + e.daysPresent, 0);
+    const totalPossibleDays = eventDetails.reduce((sum, e) => sum + e.totalDays, 0);
+    const overallPercentage = totalPossibleDays > 0 ? ((totalDaysAttended / totalPossibleDays) * 100).toFixed(2) : '0.00';
+
+    res.json({
+      student: {
+        sid: req.user.sid,
+        name: req.user.name,
+        isAdmin: req.user.isAdmin
+      },
+      summary: {
+        totalEvents: eventDetails.length,
+        attendedEventsCount: attendedEvents.length,
+        qualifiedEventsCount: qualifiedEvents.length,
+        totalDaysAttended,
+        overallPercentage
+      },
+      events: eventDetails
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // --- API ROUTES ---
 
@@ -41,7 +439,7 @@ app.get('/api/events', async (req, res) => {
 });
 
 // 2. Create an event
-app.post('/api/events', async (req, res) => {
+app.post('/api/events', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { name, description, startDate, endDate } = req.body;
     const start = new Date(startDate);
@@ -138,7 +536,7 @@ app.post('/api/attendance', async (req, res) => {
 });
 
 // 5. Get Event Report (calculates 40% rule + manual qualification overrides)
-app.get('/api/events/:id/report', async (req, res) => {
+app.get('/api/events/:id/report', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const eventId = req.params.id;
     const event = await Event.findById(eventId);
@@ -197,7 +595,7 @@ app.get('/api/events/:id/report', async (req, res) => {
 });
 
 // Update or toggle manual qualification for a student in an event
-app.put('/api/events/:id/qualification', async (req, res) => {
+app.put('/api/events/:id/qualification', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { sid, isQualified } = req.body;
     if (!sid || typeof isQualified !== 'boolean') {
@@ -220,7 +618,7 @@ app.put('/api/events/:id/qualification', async (req, res) => {
 });
 
 // 6. Update an event
-app.put('/api/events/:id', async (req, res) => {
+app.put('/api/events/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { name, description, startDate, endDate } = req.body;
     const start = new Date(startDate);
@@ -242,7 +640,7 @@ app.put('/api/events/:id', async (req, res) => {
 });
 
 // Delete all events, attendance records, and qualifications
-app.delete('/api/events', async (req, res) => {
+app.delete('/api/events', authenticateToken, requireAdmin, async (req, res) => {
   try {
     await Event.deleteMany({});
     await Attendance.deleteMany({});
@@ -254,7 +652,7 @@ app.delete('/api/events', async (req, res) => {
 });
 
 // 7. Delete an event
-app.delete('/api/events/:id', async (req, res) => {
+app.delete('/api/events/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const event = await Event.findByIdAndDelete(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -268,7 +666,7 @@ app.delete('/api/events/:id', async (req, res) => {
 });
 
 // 8. Get specific attendance records for a student in an event
-app.get('/api/events/:id/attendance/:sid', async (req, res) => {
+app.get('/api/events/:id/attendance/:sid', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const records = await Attendance.find({ eventId: req.params.id, sid: req.params.sid }).sort({ date: 1 });
     res.json(records);
@@ -278,7 +676,7 @@ app.get('/api/events/:id/attendance/:sid', async (req, res) => {
 });
 
 // 9. Update an attendance record
-app.put('/api/attendance/:id', async (req, res) => {
+app.put('/api/attendance/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { date, sid } = req.body;
     const recordDate = new Date(date);
@@ -308,7 +706,7 @@ app.put('/api/attendance/:id', async (req, res) => {
 });
 
 // 10. Delete an attendance record
-app.delete('/api/attendance/:id', async (req, res) => {
+app.delete('/api/attendance/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const record = await Attendance.findByIdAndDelete(req.params.id);
     if (!record) return res.status(404).json({ error: 'Attendance record not found' });
@@ -319,7 +717,7 @@ app.delete('/api/attendance/:id', async (req, res) => {
 });
 
 // 11. Get attendance by date
-app.get('/api/attendance/date/:date', async (req, res) => {
+app.get('/api/attendance/date/:date', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const targetDate = new Date(req.params.date);
     targetDate.setHours(0, 0, 0, 0);
@@ -350,7 +748,7 @@ app.get('/api/attendance/date/:date', async (req, res) => {
 });
 
 // 12. Manual Attendance Entry (bypass today's date checks)
-app.post('/api/attendance/manual', async (req, res) => {
+app.post('/api/attendance/manual', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { eventId, sid, name, date } = req.body;
     if (!eventId || !sid || !date) {
@@ -408,7 +806,7 @@ function formatDateDDMMYYYY(d) {
 }
 
 // 13. Export Event-Wise Attendance as Excel (.xlsx)
-app.get('/api/events/:id/export', async (req, res) => {
+app.get('/api/events/:id/export', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const event = await Event.findById(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -523,7 +921,7 @@ app.get('/api/events/:id/export', async (req, res) => {
 });
 
 // 14. Export Merged Qualified Students across all events as Excel (.xlsx)
-app.get('/api/reports/qualified-merged', async (req, res) => {
+app.get('/api/reports/qualified-merged', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const events = await Event.find().sort({ startDate: 1 });
 
