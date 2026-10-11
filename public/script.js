@@ -209,7 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const user = getCurrentUser();
 
       // Restrict admin pages if student
-      if (!user || (!user.isAdmin && ['dashboard', 'events', 'daily-attendance'].includes(target))) {
+      if (!user || (!user.isAdmin && ['dashboard', 'events', 'daily-attendance', 'kiosk'].includes(target))) {
         return;
       }
 
@@ -1080,7 +1080,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const payload = { eventId, sid };
       if (name) payload.name = name;
 
-      const res = await fetch(`${API_BASE}/attendance`, {
+      const res = await authFetch(`${API_BASE}/attendance`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

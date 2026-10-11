@@ -484,8 +484,8 @@ app.get('/api/events/active', async (req, res) => {
   }
 });
 
-// 4. Mark Attendance
-app.post('/api/attendance', async (req, res) => {
+// 4. Mark Attendance (Admin Only)
+app.post('/api/attendance', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { eventId, sid, name } = req.body;
     if (!eventId || !sid) {
