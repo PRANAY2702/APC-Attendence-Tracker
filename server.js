@@ -18,6 +18,7 @@ const Attendance = require('./models/Attendance');
 const Qualification = require('./models/Qualification');
 const Otp = require('./models/Otp');
 const ExcelJS = require('exceljs');
+const googleSheets = require('./services/googleSheets');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -526,7 +527,9 @@ app.post('/api/attendance', authenticateToken, requireAdmin, async (req, res) =>
     });
 
     await attendance.save();
-    res.status(200).json({ message: `Attendance marked for ${member.name} (SID: ${sid})`, member });
+
+    const displayName = (member && member.name) ? member.name : `Student (${sid})`;
+    res.status(200).json({ message: `Attendance marked for ${displayName}`, member });
   } catch (err) {
     if (err.code === 11000) {
       return res.status(400).json({ error: 'Attendance already marked for today' });
@@ -563,7 +566,7 @@ app.get('/api/events/:id/report', authenticateToken, requireAdmin, async (req, r
 
       report.push({
         sid: stat._id,
-        name: member ? member.name : 'Unknown',
+        name: member && member.name ? member.name : null,
         daysPresent: stat.daysPresent,
         totalDays: event.totalDays,
         attendancePercentage: attendancePercentage.toFixed(2),
@@ -578,7 +581,7 @@ app.get('/api/events/:id/report', authenticateToken, requireAdmin, async (req, r
         const member = await Member.findOne({ sid });
         report.push({
           sid,
-          name: member ? member.name : 'Unknown',
+          name: member && member.name ? member.name : null,
           daysPresent: 0,
           totalDays: event.totalDays,
           attendancePercentage: "0.00",
@@ -675,6 +678,72 @@ app.get('/api/events/:id/attendance/:sid', authenticateToken, requireAdmin, asyn
   }
 });
 
+// 8b. Bulk Remove Students Completely From An Event (Admin Only)
+app.delete('/api/events/:id/students', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const eventId = req.params.id;
+    let { sids } = req.body;
+
+    if (!sids || !Array.isArray(sids) || sids.length === 0) {
+      return res.status(400).json({ error: 'Please provide an array of student SIDs to remove.' });
+    }
+
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const cleanSids = sids.map(s => String(s).trim()).filter(Boolean);
+
+    // Delete attendance records for these students in this event
+    const attResult = await Attendance.deleteMany({
+      eventId: new mongoose.Types.ObjectId(eventId),
+      sid: { $in: cleanSids }
+    });
+
+    // Delete qualification records for these students in this event
+    const qualResult = await Qualification.deleteMany({
+      eventId: new mongoose.Types.ObjectId(eventId),
+      sid: { $in: cleanSids }
+    });
+
+    res.json({
+      message: `Successfully removed ${cleanSids.length} student(s) from "${event.name}".`,
+      deletedAttendanceCount: attResult.deletedCount,
+      deletedQualificationCount: qualResult.deletedCount,
+      removedSids: cleanSids
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 8c. Remove Single Student Completely From An Event (Admin Only)
+app.delete('/api/events/:id/students/:sid', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const eventId = req.params.id;
+    const sid = req.params.sid.trim();
+
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const attResult = await Attendance.deleteMany({
+      eventId: new mongoose.Types.ObjectId(eventId),
+      sid
+    });
+
+    await Qualification.deleteMany({
+      eventId: new mongoose.Types.ObjectId(eventId),
+      sid
+    });
+
+    res.json({
+      message: `Student (${sid}) completely removed from "${event.name}".`,
+      deletedCount: attResult.deletedCount
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 9. Update an attendance record
 app.put('/api/attendance/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -698,7 +767,7 @@ app.put('/api/attendance/:id', authenticateToken, requireAdmin, async (req, res)
     existingRecord.date = recordDate;
     existingRecord.sid = sid;
     await existingRecord.save();
-    
+
     res.json(existingRecord);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -710,6 +779,7 @@ app.delete('/api/attendance/:id', authenticateToken, requireAdmin, async (req, r
   try {
     const record = await Attendance.findByIdAndDelete(req.params.id);
     if (!record) return res.status(404).json({ error: 'Attendance record not found' });
+
     res.json({ message: 'Attendance deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -757,13 +827,10 @@ app.post('/api/attendance/manual', authenticateToken, requireAdmin, async (req, 
 
     let member = await Member.findOne({ sid });
     if (!member) {
-      if (!name) {
-        return res.status(404).json({ error: 'Member not found. Please provide name to register.' });
-      }
-      member = new Member({ sid, name });
+      member = new Member({ sid, name: name ? name.trim() : null });
       await member.save();
     } else if (name && member.name !== name) {
-      member.name = name;
+      member.name = name.trim();
       await member.save();
     }
 
@@ -787,11 +854,177 @@ app.post('/api/attendance/manual', authenticateToken, requireAdmin, async (req, 
     });
 
     await attendance.save();
-    res.status(200).json({ message: `Attendance marked for ${member.name} on ${targetDate.toLocaleDateString()}` });
+
+    const displayName = (member && member.name) ? member.name : `Student (${sid})`;
+    res.status(200).json({ message: `Attendance marked for ${displayName} on ${targetDate.toLocaleDateString()}` });
   } catch (err) {
     if (err.code === 11000) {
       return res.status(400).json({ error: 'Attendance already marked for this date' });
     }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12b. Bulk Attendance Marking (Admin Only)
+app.post('/api/attendance/bulk', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { eventId, sids, date } = req.body;
+    if (!eventId || !sids) {
+      return res.status(400).json({ error: 'Event ID and SIDs are required' });
+    }
+
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    // Target date defaults to today if not provided
+    const targetDate = date ? new Date(date) : new Date();
+    targetDate.setHours(0, 0, 0, 0);
+
+    const eventStart = new Date(event.startDate).setHours(0, 0, 0, 0);
+    const eventEnd = new Date(event.endDate).setHours(23, 59, 59, 999);
+
+    if (targetDate < eventStart || targetDate > eventEnd) {
+      return res.status(400).json({ error: 'Selected date must be within event start and end dates.' });
+    }
+
+    // Parse SIDs from array or string (splits on newlines, commas, semicolons, spaces)
+    let rawSids = [];
+    if (Array.isArray(sids)) {
+      rawSids = sids;
+    } else if (typeof sids === 'string') {
+      rawSids = sids.split(/[\r\n,;\s]+/);
+    }
+
+    // Clean and deduplicate SIDs
+    const cleanSids = Array.from(new Set(
+      rawSids
+        .map(s => String(s).trim())
+        .filter(s => s.length > 0)
+    ));
+
+    if (cleanSids.length === 0) {
+      return res.status(400).json({ error: 'No valid SIDs provided.' });
+    }
+
+    let newlyMarked = 0;
+    let alreadyMarked = 0;
+    let newMembersCreated = 0;
+    const addedSids = [];
+    const skippedSids = [];
+
+    for (const sid of cleanSids) {
+      // Find or create member with name: null
+      let member = await Member.findOne({ sid });
+      if (!member) {
+        member = new Member({ sid, name: null });
+        await member.save();
+        newMembersCreated++;
+      }
+
+      // Check if attendance already marked for this date
+      const existing = await Attendance.findOne({
+        eventId,
+        sid,
+        date: targetDate
+      });
+
+      if (existing) {
+        alreadyMarked++;
+        skippedSids.push(sid);
+      } else {
+        const attendance = new Attendance({
+          eventId,
+          sid,
+          date: targetDate
+        });
+        await attendance.save();
+        newlyMarked++;
+        addedSids.push(sid);
+      }
+    }
+
+    res.status(200).json({
+      message: `Bulk attendance completed: ${newlyMarked} marked present, ${alreadyMarked} already recorded.`,
+      summary: {
+        total: cleanSids.length,
+        newlyMarked,
+        alreadyMarked,
+        newMembersCreated
+      },
+      addedSids,
+      skippedSids
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12c. Update Member Name / Details (e.g. Set name after bulk attendance) (Admin Only)
+app.patch('/api/members/:sid', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const sid = req.params.sid.trim();
+    const { name, email, phone } = req.body;
+
+    let member = await Member.findOne({ sid });
+    if (!member) {
+      member = new Member({
+        sid,
+        name: name ? name.trim() : null,
+        email: email ? email.trim() : null,
+        phone: phone ? phone.trim() : null
+      });
+      await member.save();
+    } else {
+      if (name !== undefined) member.name = name ? name.trim() : null;
+      if (email !== undefined) member.email = email ? email.trim() : null;
+      if (phone !== undefined) member.phone = phone ? phone.trim() : null;
+      await member.save();
+    }
+
+    res.json({ message: 'Student details updated successfully', member });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12d. Google Sheets Integration Status & Info
+app.get('/api/sheets/info', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { eventId, tab } = req.query;
+    let url = googleSheets.getSheetUrl();
+    if (googleSheets.isConfigured() && (eventId || tab)) {
+      url = await googleSheets.getTabUrl(eventId || tab);
+    }
+    res.json({
+      isConfigured: googleSheets.isConfigured(),
+      url
+    });
+  } catch (err) {
+    res.json({
+      isConfigured: googleSheets.isConfigured(),
+      url: googleSheets.getSheetUrl()
+    });
+  }
+});
+
+// 12e. Manual Trigger for Google Sheets Sync (Admin Only)
+app.post('/api/sheets/sync', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { eventId } = req.body || {};
+    let result;
+    if (eventId) {
+      result = await googleSheets.syncEventToSheet(eventId);
+    } else {
+      result = await googleSheets.syncAll();
+    }
+
+    res.json({
+      message: 'Google Sheets sync completed',
+      result,
+      url: googleSheets.getSheetUrl(),
+      isConfigured: googleSheets.isConfigured()
+    });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

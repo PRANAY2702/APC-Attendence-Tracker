@@ -74,7 +74,9 @@
         <header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
           <h1>Events Management</h1>
           <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
-            <button id="btn-export-merged-qualified" class="btn-secondary">Export Qualified (Merged)</button>
+            <button id="btn-sheets-qualified" class="btn-sheets">📊 Qualified Google Sheet</button>
+            <button id="btn-sync-all-sheets" class="btn-secondary" title="Sync all events & qualified sheet to Google Sheets">↻ Sync Google Sheets</button>
+            <button id="btn-show-bulk-att-general" class="btn-secondary">📋 Bulk Attendance</button>
             <button id="btn-delete-all-events" class="btn-danger">Delete All Events</button>
             <button id="btn-show-create-event" class="btn-primary">Create Event</button>
           </div>
@@ -120,16 +122,25 @@
           <div class="modal-content glass-panel large-modal">
             <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
               <h2 style="margin: 0;">Event Report</h2>
-              <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <button id="btn-export-event-excel" class="btn-secondary" style="padding: 8px 16px;">Export Excel</button>
-                <button id="btn-show-manual-att" class="btn-primary" style="padding: 8px 16px;">Add Attendance</button>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                <button id="btn-open-event-sheets" class="btn-sheets" style="padding: 8px 14px;">📊 Google Sheet</button>
+                <button id="btn-sync-event-sheets" class="btn-secondary" style="padding: 8px 12px;" title="Sync current event to Google Sheets">↻ Sync</button>
+                <button id="btn-show-bulk-att-event" class="btn-secondary" style="padding: 8px 14px;">📋 Bulk Attendance</button>
+                <button id="btn-show-manual-att" class="btn-primary" style="padding: 8px 14px;">+ Single Entry</button>
               </div>
             </div>
-            <p id="report-event-name"></p>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+              <p id="report-event-name" style="margin: 0;"></p>
+              <div id="report-bulk-actions" class="hidden" style="display: flex; align-items: center; gap: 10px;">
+                <span id="report-selected-count" style="font-size: 0.88rem; color: var(--primary); font-weight: 600;">0 selected</span>
+                <button type="button" id="btn-bulk-delete-students" class="btn-danger" style="padding: 6px 12px; font-size: 0.85rem;">🗑 Remove Selected From Event</button>
+              </div>
+            </div>
             <div class="table-container">
               <table id="report-table">
                 <thead>
                   <tr>
+                    <th style="width: 44px; text-align: center;"><input type="checkbox" id="report-select-all" title="Select All" style="cursor: pointer; width: 16px; height: 16px;"></th>
                     <th>SID</th>
                     <th>Name</th>
                     <th>Days Present</th>
@@ -198,6 +209,67 @@
             </form>
           </div>
         </div>
+
+        <!-- BULK ATTENDANCE MODAL -->
+        <div id="bulk-attendance-modal" class="modal hidden">
+          <div class="modal-content glass-panel" style="max-width: 600px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <h2 style="margin: 0;">📋 Bulk Attendance Marking</h2>
+              <span id="bulk-sid-counter-pill" class="badge-counter-pill">0 SIDs</span>
+            </div>
+            <p style="font-size: 0.88rem; color: var(--text-main); margin-bottom: 1rem; opacity: 0.9;">
+              Paste multiple student SIDs below. If student names are not registered yet, attendance will still be marked and names can be added anytime later.
+            </p>
+            <form id="bulk-attendance-form">
+              <div class="form-group" id="bulk-event-group">
+                <label for="bulk-att-event-select">Target Event</label>
+                <select id="bulk-att-event-select" required>
+                  <option value="">Select an Event</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="bulk-att-date">Attendance Date</label>
+                <input type="date" id="bulk-att-date" required>
+              </div>
+              <div class="form-group">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <label for="bulk-att-sids" style="margin: 0;">Student SIDs (one per line, space, or comma-separated)</label>
+                  <button type="button" id="btn-clear-bulk-sids" class="btn-clear-link">Clear</button>
+                </div>
+                <textarea id="bulk-att-sids" rows="7" placeholder="e.g.&#10;2501001&#10;2501002&#10;2501003, 2501004" required class="bulk-textarea"></textarea>
+              </div>
+              <div id="bulk-result-box" class="bulk-result-box hidden"></div>
+              <div class="modal-actions mt-4">
+                <button type="button" id="btn-cancel-bulk-att" class="btn-secondary">Cancel</button>
+                <button type="submit" id="btn-submit-bulk-att" class="btn-primary">Mark Attendance</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- EDIT STUDENT NAME MODAL -->
+        <div id="edit-member-name-modal" class="modal hidden">
+          <div class="modal-content glass-panel" style="max-width: 440px;">
+            <h2>✏️ Set Student Name</h2>
+            <p style="font-size: 0.88rem; color: var(--text-main); margin-bottom: 1rem; opacity: 0.9;">
+              Assign or update the official name for this student SID.
+            </p>
+            <form id="edit-member-name-form">
+              <div class="form-group">
+                <label>Student ID (SID)</label>
+                <input type="text" id="edit-member-sid" readonly style="opacity: 0.75; cursor: not-allowed;">
+              </div>
+              <div class="form-group">
+                <label for="edit-member-name-input">Full Name</label>
+                <input type="text" id="edit-member-name-input" placeholder="e.g. Rahul Sharma" required autocomplete="off">
+              </div>
+              <div class="modal-actions mt-4">
+                <button type="button" id="btn-cancel-edit-member" class="btn-secondary">Cancel</button>
+                <button type="submit" class="btn-primary">Save Name</button>
+              </div>
+            </form>
+          </div>
+        </div>
       </section>
 
       <!-- DAILY ATTENDANCE -->
@@ -258,7 +330,12 @@
       <section id="kiosk" class="page">
         <div class="kiosk-container glass-panel">
           <h1>Mark Attendance</h1>
-          <p>Scan your ID or enter your SID below.</p>
+          <p>Scan your ID or enter your SIDs below.</p>
+
+          <div class="kiosk-mode-tabs mt-4">
+            <button type="button" class="kiosk-tab-btn active" id="btn-kiosk-tab-single">Single ID</button>
+            <button type="button" class="kiosk-tab-btn" id="btn-kiosk-tab-bulk">Bulk SIDs</button>
+          </div>
 
           <div class="form-group mt-4">
             <label>Select Active Event</label>
@@ -267,6 +344,7 @@
             </select>
           </div>
 
+          <!-- Single Mode Form -->
           <form id="kiosk-form" class="mt-4">
             <div class="input-glow-wrapper">
               <input type="text" id="kiosk-sid" placeholder="Enter SID (e.g. 2026123)" required autocomplete="off">
@@ -277,6 +355,18 @@
             </div>
 
             <button type="submit" class="btn-primary mt-4 w-full">Mark Present</button>
+          </form>
+
+          <!-- Bulk Mode Form -->
+          <form id="kiosk-bulk-form" class="mt-4 hidden">
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <label for="kiosk-bulk-sids" style="font-size: 0.85rem;">Paste Multiple SIDs</label>
+                <span id="kiosk-sid-counter-pill" class="badge-counter-pill">0 SIDs</span>
+              </div>
+              <textarea id="kiosk-bulk-sids" rows="5" placeholder="Enter or scan SIDs (separated by newlines or spaces)&#10;2501001&#10;2501002" class="bulk-textarea" style="width: 100%;"></textarea>
+            </div>
+            <button type="submit" id="btn-kiosk-bulk-submit" class="btn-primary mt-2 w-full">Mark All Present</button>
           </form>
 
           <div id="kiosk-message" class="message hidden mt-4"></div>
